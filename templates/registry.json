@@ -1,0 +1,10 @@
+{
+    "https://{{ registry_host }}/v1/": {
+        "auth": "{{ registry_password }}",
+        "email": ""
+    },
+    "{{ registry_host }}": {
+        "auth": "{{ registry_password }}",
+        "email": ""
+    }
+}

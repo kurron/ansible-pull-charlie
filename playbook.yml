@@ -1,0 +1,142 @@
+#!/usr/bin/env ansible-playbook
+
+- name: Gather prerequisites
+  hosts: all
+  gather_facts: True
+  tasks:
+    - name: create groups based on distribution
+      group_by: key={{ ansible_distribution }}
+    - hostname: name=bravo
+    - lineinfile: dest=/etc/hosts line="127.0.0.1       bravo"
+
+# https://www.digitalocean.com/community/tutorials/how-to-add-swap-on-ubuntu-14-04
+- name: Add Swap File
+  hosts: Ubuntu
+  gather_facts: True
+  become: True
+  vars:
+       swap_size: "4G"
+       swap_path: "/swapfile"
+       swappiness: "vm.swappiness=10"
+       inode: "vm.vfs_cache_pressure=50"
+  tasks:
+      - command: /usr/bin/fallocate --length {{ swap_size }} {{ swap_path }}
+      - file: path={{ swap_path }} owner=root group=root mode=0600
+      - command: /sbin/mkswap {{ swap_path }}
+      - command: /sbin/swapon {{ swap_path }}
+      - lineinfile: dest=/etc/fstab line="{{ swap_path }}   none    swap    sw    0   0"
+      - command: /sbin/sysctl {{ swappiness }}
+      - lineinfile: dest=/etc/sysctl.conf line="{{ swappiness }}"
+      - command: /sbin/sysctl {{ inode }}
+      - lineinfile: dest=/etc/sysctl.conf line="{{ inode }}"
+
+- name: Configure the Docker Partition
+  hosts: Ubuntu
+  become: True
+  vars:
+       device_name: "/dev/sdb"
+       group_name: "docker"
+       volume_name: "storage"
+       volume_size: "7G"
+       mount_point: "/var/lib/docker"
+  tasks:
+      - apt: name=xfsprogs state=present update_cache=true cache_valid_time=3600 install_recommends=true
+      - apt: name=lvm2 state=present update_cache=true cache_valid_time=3600 install_recommends=true
+      - command: /sbin/pvcreate {{ device_name }}
+      - command: /sbin/vgcreate {{ group_name }} {{ device_name }}
+      - command: /sbin/lvcreate --name {{ volume_name }} --size {{ volume_size }} {{ group_name }}
+      - command: /sbin/mkfs.xfs /dev/{{ group_name }}/{{ volume_name }}
+      - mount: name={{ mount_point }} src=/dev/{{ group_name }}/{{ volume_name }} fstype=xfs opts=noatime state=mounted
+
+- name: Install Docker
+  hosts: Ubuntu
+  become: True
+  vars:
+       user_account: vagrant
+       compose_version: "1.7.1"
+#      This must match the mount point that is used by the LVM creation task
+       mount_point: /var/lib/docker
+       registry_host: "should be set as an extra vars argument"
+       registry_password: "should be set as an extra vars argument"
+  tasks:
+      - apt: name=curl state=latest update_cache=true cache_valid_time=600
+      # we can't use Ansible to grab the file because Docker has issues with its digital certificate
+      - command: /usr/bin/curl --location --output /root/install-docker https://get.docker.com/ creates=/root/install-docker
+      - file: path=/root/install-docker owner=root group=root mode=0500
+      - shell: /root/install-docker creates=/usr/bin/docker
+      - lineinfile: dest=/etc/default/grub regexp='^GRUB_CMDLINE_LINUX=""' line='GRUB_CMDLINE_LINUX="cgroup_enable=memory swapaccount=1"'
+      - command: /usr/sbin/update-grub
+      - lineinfile: dest=/etc/default/docker line='DOCKER_OPTS="-H tcp://0.0.0.0:2375 -H unix:///var/run/docker.sock --storage-driver=overlay --graph={{ mount_point }}"'
+      - user: name={{ user_account }} groups=docker append=yes
+#     - command: service docker restart
+      - service: name=docker state=restarted
+      - command: docker run hello-world
+
+      # we can't use Ansible to grab the file because Docker has issues with its digital certificate
+      - shell: /usr/bin/curl --location --output /usr/local/bin/docker-compose https://github.com/docker/compose/releases/download/{{ compose_version }}/docker-compose-`uname -s`-`uname -m` creates=/usr/local/bin/docker-compose
+      - file: path=/usr/local/bin/docker-compose owner=root group=root mode=0555
+      - command: docker-compose --version
+      - template: src=templates/registry.json dest=/home/{{ user_account }}/.dockercfg mode=0544 backup=no force=yes
+
+- name: Install Docker Credentials
+  hosts: Ubuntu
+  become: True
+  vars:
+       user_account: vagrant
+       registry_host: "EXPECTED TO BE SOURCED VIA THE ENVIRONMENT"
+       registry_password: "EXPECTED TO BE SOURCED VIA THE ENVIRONMENT"
+  tasks:
+      - debug: msg="host={{ registry_host }}, password= {{ registry_password }}"
+      - template: src=templates/registry.json dest=/home/{{ user_account }}/.dockercfg mode=0544 backup=no force=yes
+
+- name: Install Self-Signed Certificate
+  hosts: Ubuntu
+  become: True
+  tasks:
+      - file: path=/usr/local/share/ca-certificates/docker-registry state=directory
+      - file: path=/etc/ssl/certs/ state=directory
+      - get_url: >
+                url=http://192.168.254.81:81/artifactory/static/ease/docker-registry/certifcate/registry.transparent.CA.crt
+                dest=/usr/local/share/ca-certificates/docker-registry/registry.transparent.CA.crt
+      - shell: update-ca-certificates
+#     - command: service docker restart
+      - service: name=docker state=restarted
+
+- name: Pull Down Docker Containers
+  hosts: Ubuntu
+  become: False
+  tags:
+  - images
+  vars:
+       rest_services_tag: 1.0.944.MILESTONE
+       core_services_tag: 1.0.768.MILESTONE
+       tlo_tag: 1.11.21
+       lds_tag: 1.0.900
+       mli_tag: 14-master
+       journaler_tag: 16-master
+  tasks:
+      - docker_image:
+            name: "registry.transparent.com/mold-e-rest-services"
+            tag: "{{ rest_services_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/mold-e-reporting-event-processor"
+            tag: "{{ core_services_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/tlo"
+            tag: "{{ tlo_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/lds"
+            tag: "{{ lds_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/lds-varnish"
+            tag: "{{ lds_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/lds-nginx"
+            tag: "{{ lds_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/molde-mli-forever"
+            tag: "{{ mli_tag }}"
+      - docker_image:
+            name: "registry.transparent.com/molde-journal"
+            tag: "{{ journaler_tag }}"
+
