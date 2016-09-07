@@ -109,7 +109,7 @@
   - images
   vars:
        core_services_tag: 1.0.768.MILESTONE
-       replay_tag: 1.0.49.MILESTONE
+       replay_tag: 1.1.49.MILESTONE
   tasks:
       - docker_image:
             name: "registry.transparent.com/mold-e-reporting-event-processor"
