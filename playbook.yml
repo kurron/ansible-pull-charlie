@@ -7,7 +7,7 @@
     - name: create groups based on distribution
       group_by: key={{ ansible_distribution }}
     - hostname: name=bravo
-    - lineinfile: dest=/etc/hosts line="127.0.0.1       bravo"
+    - lineinfile: dest=/etc/hosts line="127.0.0.1       charlie"
 
 # https://www.digitalocean.com/community/tutorials/how-to-add-swap-on-ubuntu-14-04
 - name: Add Swap File
@@ -108,35 +108,19 @@
   tags:
   - images
   vars:
-       rest_services_tag: 1.0.944.MILESTONE
        core_services_tag: 1.0.768.MILESTONE
-       tlo_tag: 1.11.21
-       lds_tag: 1.0.900
-       mli_tag: 14-master
-       journaler_tag: 16-master
+       replay_tag: 1.0.49.MILESTONE
   tasks:
-      - docker_image:
-            name: "registry.transparent.com/mold-e-rest-services"
-            tag: "{{ rest_services_tag }}"
       - docker_image:
             name: "registry.transparent.com/mold-e-reporting-event-processor"
             tag: "{{ core_services_tag }}"
       - docker_image:
-            name: "registry.transparent.com/tlo"
-            tag: "{{ tlo_tag }}"
+            name: "registry.transparent.com/mold-e-replay"
+            tag: "{{ replay_tag }}"
       - docker_image:
-            name: "registry.transparent.com/lds"
-            tag: "{{ lds_tag }}"
+            name: "mongo"
+            tag: "latest"
       - docker_image:
-            name: "registry.transparent.com/lds-varnish"
-            tag: "{{ lds_tag }}"
-      - docker_image:
-            name: "registry.transparent.com/lds-nginx"
-            tag: "{{ lds_tag }}"
-      - docker_image:
-            name: "registry.transparent.com/molde-mli-forever"
-            tag: "{{ mli_tag }}"
-      - docker_image:
-            name: "registry.transparent.com/molde-journal"
-            tag: "{{ journaler_tag }}"
+            name: "rabbitmq"
+            tag: "management"
 
