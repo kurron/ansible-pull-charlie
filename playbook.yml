@@ -6,7 +6,7 @@
   tasks:
     - name: create groups based on distribution
       group_by: key={{ ansible_distribution }}
-    - hostname: name=bravo
+    - hostname: name=charlie
     - lineinfile: dest=/etc/hosts line="127.0.0.1       charlie"
 
 # https://www.digitalocean.com/community/tutorials/how-to-add-swap-on-ubuntu-14-04
